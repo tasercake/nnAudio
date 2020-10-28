@@ -405,6 +405,7 @@ class MelSpectrogram(torch.nn.Module):
         self.power = power
         self.trainable_mel = trainable_mel
         self.trainable_STFT = trainable_STFT
+        self.verbose = verbose
 
         # Preparing for the stft layer. No need for center
         self.stft = STFT(n_fft=n_fft, freq_bins=None, hop_length=hop_length, window=window,
@@ -463,6 +464,70 @@ class MelSpectrogram(torch.nn.Module):
         return 'Mel filter banks size = {}, trainable_mel={}'.format(
             (*self.mel_basis.shape,), self.trainable_mel, self.trainable_STFT
         )        
+
+    def to_stft(self, melspec, max_steps=1000, loss_threshold=1e-8, grad_threshold=1e-7, random_start=False, sgd_kwargs=None, lr_scheduler_kwargs=None, eps=1e-12, return_extras=False, verbose=None):
+        """
+        Best-attempt spectrogram inversion
+        """
+        def loss_fn(pred, target):
+            pred = pred.unsqueeze(1) if pred.ndim == 3 else pred
+            target = target.unsqueeze(1) if target.ndim == 3 else target
+
+            loss = (pred - target).pow(2).sum(-2).mean()
+            return loss
+
+        verbose = verbose or self.verbose
+        # SGD arguments
+        default_sgd_kwargs = dict(lr=1e3, momentum=0.9)
+        if sgd_kwargs:
+            default_sgd_kwargs.update(sgd_kwargs)
+        sgd_kwargs = default_sgd_kwargs
+        # ReduceLROnPlateau arguments
+        default_scheduler_kwargs = dict(factor=0.1, patience=500, threshold=1e-4, min_lr=1e-4, verbose=verbose)
+        if lr_scheduler_kwargs:
+            default_scheduler_kwargs.update(lr_scheduler_kwargs)
+        lr_scheduler_kwargs = default_scheduler_kwargs
+
+        mel_basis = self.mel_basis.detach()
+        shape = melspec.shape
+        batch_size, n_mels, time = shape[0], shape[-2], shape[-1]
+        _, n_freq = mel_basis.shape
+        melspec = melspec.detach().view(-1, n_mels, time)
+        if random_start:
+            pred_stft_shape = (batch_size, n_freq, time)
+            pred_stft = torch.zeros(*pred_stft_shape, dtype=torch.float32, device=mel_basis.device).normal_().clamp_(eps)
+        else:
+            pred_stft = (torch.pinverse(mel_basis) @ melspec).clamp(eps)
+        pred_stft = nn.Parameter(pred_stft, requires_grad=True)
+
+        sgd_kwargs["lr"] = sgd_kwargs["lr"] * batch_size
+        optimizer = torch.optim.SGD([pred_stft], **sgd_kwargs)
+
+        losses = []
+        for i in range(max_steps):
+            optimizer.zero_grad()
+            pred_mel = mel_basis @ pred_stft
+            loss = loss_fn(pred_mel, melspec)
+            losses.append(loss.item())
+            loss.backward()
+            optimizer.step()
+
+            # Check conditions
+            if not loss.isfinite():
+                raise OverflowError("Overflow encountered in Mel -> STFT optimization")
+            if loss_threshold and loss < loss_threshold:
+                if verbose:
+                    print(f"Target error of {loss_threshold} reached. Stopping optimization.")
+                break
+            if grad_threshold and pred_stft.grad.max() < grad_threshold:
+                if verbose:
+                    print(f"Target max gradient of {grad_threshold} reached. Stopping optimization.")
+                break
+
+        pred_stft = pred_stft.detach().clamp(eps) ** 0.5
+        if return_extras:
+            return pred_stft, pred_mel.detach(), losses
+        return pred_stft.view((*shape[:-2], freq, time))
 
 
 class MFCC(torch.nn.Module):
@@ -1887,13 +1952,13 @@ class Griffin_Lim(torch.nn.Module):
                  n_iter=32,
                  hop_length=None,
                  win_length=None,
-                 window='hann', 
+                 window='hann',
                  center=True,
                  pad_mode='reflect',
                  momentum=0.99,
                  device='cpu'):
         super().__init__()
-        
+
         self.n_fft = n_fft
         self.win_length = win_length
         self.n_iter = n_iter
@@ -1909,11 +1974,11 @@ class Griffin_Lim(torch.nn.Module):
             self.hop_length = n_fft//4
         else:
             self.hop_length = hop_length
-            
+
         # Creating window function for stft and istft later
         self.w = torch.tensor(get_window(window,
-                                         int(self.win_length), 
-                                         fftbins=True), 
+                                         int(self.win_length),
+                                         fftbins=True),
                               device=device).float()
 
     def forward(self, S):
@@ -1927,16 +1992,16 @@ class Griffin_Lim(torch.nn.Module):
         """
         
         assert S.dim()==3 , "Please make sure your input is in the shape of (batch, freq_bins, timesteps)"
-        
+
         # Initializing Random Phase
         rand_phase = torch.randn(*S.shape, device=self.device)
         angles = torch.empty((*S.shape,2), device=self.device)
         angles[:, :,:,0] = torch.cos(2 * np.pi * rand_phase)
         angles[:,:,:,1] = torch.sin(2 * np.pi * rand_phase)
-        
+
         # Initializing the rebuilt magnitude spectrogram
         rebuilt = torch.zeros(*angles.shape, device=self.device)
-        
+
         for _ in range(self.n_iter):
             tprev = rebuilt # Saving previous rebuilt magnitude spec
 
@@ -1945,7 +2010,7 @@ class Griffin_Lim(torch.nn.Module):
             inverse = torch.istft(S.unsqueeze(-1) * angles,
                                   self.n_fft,
                                   self.hop_length,
-                                  win_length=self.win_length, 
+                                  win_length=self.win_length,
                                   window=self.w,
                                   center=self.center)
             # wav2spec conversion
@@ -1961,12 +2026,12 @@ class Griffin_Lim(torch.nn.Module):
 
             # Phase normalization
             angles = angles.div(torch.sqrt(angles.pow(2).sum(-1)).unsqueeze(-1) + 1e-16) # normalizing the phase
-        
+
         # Using the final phase to reconstruct the waveforms
         inverse = torch.istft(S.unsqueeze(-1) * angles,
                               self.n_fft,
                               self.hop_length,
-                              win_length=self.win_length, 
+                              win_length=self.win_length,
                               window=self.w,
                               center=self.center)
         return inverse
