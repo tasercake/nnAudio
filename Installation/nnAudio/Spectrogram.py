@@ -465,7 +465,7 @@ class MelSpectrogram(torch.nn.Module):
             (*self.mel_basis.shape,), self.trainable_mel, self.trainable_STFT
         )        
 
-    def to_stft(self, melspec, max_steps=1000, loss_threshold=1e-8, grad_threshold=1e-7, random_start=False, sgd_kwargs=None, lr_scheduler_kwargs=None, eps=1e-12, return_extras=False, verbose=None):
+    def to_stft(self, melspec, max_steps=1000, loss_threshold=1e-8, grad_threshold=1e-7, random_start=False, sgd_kwargs=None, eps=1e-12, return_extras=False, verbose=None):
         """
         Best-attempt spectrogram inversion
         """
@@ -482,11 +482,6 @@ class MelSpectrogram(torch.nn.Module):
         if sgd_kwargs:
             default_sgd_kwargs.update(sgd_kwargs)
         sgd_kwargs = default_sgd_kwargs
-        # ReduceLROnPlateau arguments
-        default_scheduler_kwargs = dict(factor=0.1, patience=500, threshold=1e-4, min_lr=1e-4, verbose=verbose)
-        if lr_scheduler_kwargs:
-            default_scheduler_kwargs.update(lr_scheduler_kwargs)
-        lr_scheduler_kwargs = default_scheduler_kwargs
 
         mel_basis = self.mel_basis.detach()
         shape = melspec.shape
@@ -525,9 +520,10 @@ class MelSpectrogram(torch.nn.Module):
                 break
 
         pred_stft = pred_stft.detach().clamp(eps) ** 0.5
+        pred_stft = pred_stft.view((*shape[:-2], n_freq, time))
         if return_extras:
             return pred_stft, pred_mel.detach(), losses
-        return pred_stft.view((*shape[:-2], freq, time))
+        return pred_stft
 
 
 class MFCC(torch.nn.Module):
