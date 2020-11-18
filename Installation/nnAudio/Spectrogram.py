@@ -11,8 +11,8 @@ from torch.nn.functional import conv1d, conv2d, fold
 import numpy as np
 from time import time
 
-from nnAudio.librosa_functions import * 
-from nnAudio.utils import * 
+from nnAudio.librosa_functions import *
+from nnAudio.utils import *
 
 sz_float = 4    # size of a float
 epsilon = 10e-8 # fudge factor for normalization
@@ -56,7 +56,7 @@ class STFT(torch.nn.Module):
 
     pad_mode : str
         The padding method. Default value is 'reflect'.
-       
+
     inverse : bool
         To activate the iSTFT module or not. By default, it is False to save GPU memory.
 
@@ -76,7 +76,7 @@ class STFT(torch.nn.Module):
         Determine if the STFT kenrels are trainable or not. If ``True``, the gradients for STFT
         kernels will also be caluclated and the STFT kernels will be updated during model training.
         Default value is ``False``
-        
+
     output_format : str
         Control the spectrogram output type, either ``Magnitude``, ``Complex``, or ``Phase``.
         The output_format can also be changed during the ``forward`` method.
@@ -86,13 +86,13 @@ class STFT(torch.nn.Module):
 
     device : str
         Choose which device to initialize this layer. Default value is 'cpu'
-    
+
     Returns
     -------
     spectrogram : torch.tensor
         It returns a tensor of spectrograms.
         ``shape = (num_samples, freq_bins,time_steps)`` if ``output_format='Magnitude'``;
-        ``shape = (num_samples, freq_bins,time_steps, 2)`` if ``output_format='Complex' or 'Phase'``;        
+        ``shape = (num_samples, freq_bins,time_steps, 2)`` if ``output_format='Complex' or 'Phase'``;
 
     Examples
     --------
@@ -142,13 +142,13 @@ class STFT(torch.nn.Module):
 
         kernel_sin = torch.tensor(kernel_sin, dtype=torch.float)
         kernel_cos = torch.tensor(kernel_cos, dtype=torch.float)
-        
+
         # In this way, the inverse kernel and the forward kernel do not share the same memory...
         kernel_sin_inv = torch.cat((kernel_sin, -kernel_sin[1:-1].flip(0)), 0)
         kernel_cos_inv = torch.cat((kernel_cos, kernel_cos[1:-1].flip(0)), 0)
-        
-         
-        
+
+
+
         if iSTFT:
             self.register_buffer('kernel_sin_inv', kernel_sin_inv.unsqueeze(-1))
             self.register_buffer('kernel_cos_inv', kernel_cos_inv.unsqueeze(-1))
@@ -161,22 +161,22 @@ class STFT(torch.nn.Module):
         window_mask = torch.tensor(window_mask)
         wsin = kernel_sin * window_mask
         wcos = kernel_cos * window_mask
-        
+
         if self.trainable==False:
             self.register_buffer('wsin', wsin)
-            self.register_buffer('wcos', wcos)            
-        
+            self.register_buffer('wcos', wcos)
+
         if self.trainable==True:
             wsin = torch.nn.Parameter(wsin, requires_grad=self.trainable)
-            wcos = torch.nn.Parameter(wcos, requires_grad=self.trainable)  
+            wcos = torch.nn.Parameter(wcos, requires_grad=self.trainable)
             self.register_parameter('wsin', wsin)
-            self.register_parameter('wcos', wcos)         
-        
+            self.register_parameter('wcos', wcos)
+
 
         # Prepare the shape of window mask so that it can be used later in inverse
         self.register_buffer('window_mask', window_mask.unsqueeze(0).unsqueeze(-1))
-        
-            
+
+
 
         if verbose==True:
             print("STFT kernels created, time used = {:.4f} seconds".format(time()-start))
@@ -186,7 +186,7 @@ class STFT(torch.nn.Module):
     def forward(self, x, output_format=None):
         """
         Convert a batch of waveforms to spectrograms.
-        
+
         Parameters
         ----------
         x : torch tensor
@@ -195,15 +195,15 @@ class STFT(torch.nn.Module):
             2. ``(num_audio, len_audio)``\n
             3. ``(num_audio, 1, len_audio)``
             It will be automatically broadcast to the right shape
-        
+
         output_format : str
             Control the type of spectrogram to be return. Can be either ``Magnitude`` or ``Complex`` or ``Phase``.
-            Default value is ``Complex``.  
-            
+            Default value is ``Complex``.
+
         """
         output_format = output_format or self.output_format
         self.num_samples = x.shape[-1]
-        
+
         x = broadcast_dim(x)
         if self.center:
             if self.pad_mode == 'constant':
@@ -237,11 +237,11 @@ class STFT(torch.nn.Module):
 
     def inverse(self, X, onesided=True, length=None, refresh_win=True):
         """
-        This function is same as the :func:`~nnAudio.Spectrogram.iSTFT` class, 
-        which is to convert spectrograms back to waveforms. 
+        This function is same as the :func:`~nnAudio.Spectrogram.iSTFT` class,
+        which is to convert spectrograms back to waveforms.
         It only works for the complex value spectrograms. If you have the magnitude spectrograms,
-        please use :func:`~nnAudio.Spectrogram.Griffin_Lim`. 
-        
+        please use :func:`~nnAudio.Spectrogram.Griffin_Lim`.
+
         Parameters
         ----------
         onesided : bool
@@ -252,23 +252,23 @@ class STFT(torch.nn.Module):
             To make sure the inverse STFT has the same output length of the original waveform, please
             set `length` as your intended waveform length. By default, ``length=None``,
             which will remove ``n_fft//2`` samples from the start and the end of the output.
-            
+
         refresh_win : bool
             Recalculating the window sum square. If you have an input with fixed number of timesteps,
             you can increase the speed by setting ``refresh_win=False``. Else please keep ``refresh_win=True``
-           
-           
+
+
         """
         if (hasattr(self, 'kernel_sin_inv') != True) or (hasattr(self, 'kernel_cos_inv') != True):
-            raise NameError("Please activate the iSTFT module by setting `iSTFT=True` if you want to use `inverse`")      
-        
+            raise NameError("Please activate the iSTFT module by setting `iSTFT=True` if you want to use `inverse`")
+
         assert X.dim()==4 , "Inverse iSTFT only works for complex number," \
                             "make sure our tensor is in the shape of (batch, freq_bins, timesteps, 2)."\
                             "\nIf you have a magnitude spectrogram, please consider using Griffin-Lim."
         if onesided:
             X = extend_fbins(X) # extend freq
 
-    
+
         X_real, X_imag = X[:, :, :, 0], X[:, :, :, 1]
 
         # broadcast dimensions to support 2D convolution
@@ -276,7 +276,7 @@ class STFT(torch.nn.Module):
         X_imag_bc = X_imag.unsqueeze(1)
         a1 = conv2d(X_real_bc, self.kernel_cos_inv, stride=(1,1))
         b2 = conv2d(X_imag_bc, self.kernel_sin_inv, stride=(1,1))
-       
+
         # compute real and imag part. signal lies in the real part
         real = a1 - b2
         real = real.squeeze(-2)*self.window_mask
@@ -286,33 +286,33 @@ class STFT(torch.nn.Module):
 
         # Overlap and Add algorithm to connect all the frames
         real = overlap_add(real, self.stride)
-    
+
         # Prepare the window sumsqure for division
         # Only need to create this window once to save time
         # Unless the input spectrograms have different time steps
         if hasattr(self, 'w_sum')==False or refresh_win==True:
             self.w_sum = torch_window_sumsquare(self.window_mask.flatten(), X.shape[2], self.stride, self.n_fft).flatten()
-            self.nonzero_indices = (self.w_sum>1e-10)    
+            self.nonzero_indices = (self.w_sum>1e-10)
         else:
             pass
         real[:, self.nonzero_indices] = real[:,self.nonzero_indices].div(self.w_sum[self.nonzero_indices])
         # Remove padding
-        if length is None:       
+        if length is None:
             if self.center:
                 real = real[:, self.pad_amount:-self.pad_amount]
 
         else:
             if self.center:
-                real = real[:, self.pad_amount:self.pad_amount + length]    
+                real = real[:, self.pad_amount:self.pad_amount + length]
             else:
-                real = real[:, :length] 
-            
+                real = real[:, :length]
+
         return real
-    
+
     def extra_repr(self) -> str:
         return 'n_fft={}, Fourier Kernel size={}, iSTFT={}, trainable={}'.format(
             self.n_fft, (*self.wsin.shape,), self.iSTFT, self.trainable
-        )    
+        )
 
 
 class MelSpectrogram(torch.nn.Module):
@@ -392,9 +392,9 @@ class MelSpectrogram(torch.nn.Module):
     >>> specs = spec_layer(x)
     """
 
-    def __init__(self, sr=22050, n_fft=2048, n_mels=128, hop_length=512, 
-                window='hann', center=True, pad_mode='reflect', power=2.0, htk=False, 
-                fmin=0.0, fmax=None, norm=1, trainable_mel=False, trainable_STFT=False, 
+    def __init__(self, sr=22050, n_fft=2048, n_mels=128, hop_length=512,
+                window='hann', center=True, pad_mode='reflect', power=2.0, htk=False,
+                fmin=0.0, fmax=None, norm=1, trainable_mel=False, trainable_STFT=False,
                 verbose=True, **kwargs):
 
         super().__init__()
@@ -443,7 +443,7 @@ class MelSpectrogram(torch.nn.Module):
     def forward(self, x):
         """
         Convert a batch of waveforms to Mel spectrograms.
-        
+
         Parameters
         ----------
         x : torch tensor
@@ -452,18 +452,18 @@ class MelSpectrogram(torch.nn.Module):
             2. ``(num_audio, len_audio)``\n
             3. ``(num_audio, 1, len_audio)``
             It will be automatically broadcast to the right shape
-        """        
+        """
         x = broadcast_dim(x)
-        
+
         spec = self.stft(x, output_format='Magnitude')**self.power
 
         melspec = torch.matmul(self.mel_basis, spec)
         return melspec
-    
+
     def extra_repr(self) -> str:
         return 'Mel filter banks size = {}, trainable_mel={}'.format(
             (*self.mel_basis.shape,), self.trainable_mel, self.trainable_STFT
-        )        
+        )
 
     def to_stft(self, melspec, max_steps=1000, loss_threshold=1e-8, grad_threshold=1e-7, random_start=False, sgd_kwargs=None, eps=1e-12, return_extras=False, verbose=None):
         """
@@ -525,12 +525,27 @@ class MelSpectrogram(torch.nn.Module):
             return pred_stft, pred_mel.detach(), losses
         return pred_stft
 
+    def inverse(self, melspec, mel_inversion_params=None, stft_inversion_params=None):
+        default_mel_inversion_params = {}
+        default_stft_inversion_params = {}
+
+        mel_inversion_params = mel_inversion_params or {}
+        stft_inversion_params = stft_inversion_params or {}
+        if mel_inversion_params:
+            mel_inversion_params = {**default_mel_inversion_params, **mel_inversion_params}
+        if stft_inversion_params:
+            stft_inversion_params = {**default_stft_inversion_params, **stft_inversion_params}
+
+        recon_stft = self.to_stft(melspec, **mel_inversion_params)
+        recon_audio = self.stft.inverse(recon_stft, **stft_inversion_params)
+        return recon_audio
+
 
 class MFCC(torch.nn.Module):
     """This function is to calculate the Mel-frequency cepstral coefficients (MFCCs) of the input signal.
     This algorithm first extracts Mel spectrograms from the audio clips,
     then the discrete cosine transform is calcuated to obtain the final MFCCs.
-    Therefore, the Mel spectrogram part can be made trainable using 
+    Therefore, the Mel spectrogram part can be made trainable using
     ``trainable_mel`` and ``trainable_STFT``.
     It only support type-II DCT at the moment. Input signal should be in either of the following shapes.\n
     1. ``(len_audio)``\n
@@ -571,14 +586,14 @@ class MFCC(torch.nn.Module):
         super().__init__()
         self.melspec_layer = MelSpectrogram(sr=sr, verbose=verbose, **kwargs)
         self.m_mfcc = n_mfcc
-        
+
         # attributes that will be used for _power_to_db
         if amin <= 0:
             raise ParameterError('amin must be strictly positive')
         amin = torch.tensor([amin])
         ref = torch.abs(torch.tensor([ref]))
         self.register_buffer('amin', amin)
-        self.register_buffer('ref', ref)    
+        self.register_buffer('ref', ref)
         self.top_db = top_db
         self.n_mfcc = n_mfcc
 
@@ -598,8 +613,8 @@ class MFCC(torch.nn.Module):
             batch_wise_max = log_spec.flatten(1).max(1)[0].unsqueeze(1).unsqueeze(1)
             log_spec = torch.max(log_spec, batch_wise_max - self.top_db)
 
-        return log_spec     
-    
+        return log_spec
+
     def _dct(self, x, norm=None):
         '''
         Refer to https://github.com/zh217/torch-dct for the original implmentation.
@@ -624,22 +639,22 @@ class MFCC(torch.nn.Module):
 
         V = 2 * V
 
-        return V.permute(0,2,1)  # swapping back the time axis and freq axis    
+        return V.permute(0,2,1)  # swapping back the time axis and freq axis
 
     def forward(self, x):
         """
         Convert a batch of waveforms to MFCC.
-        
+
         Parameters
         ----------
         x : torch tensor
             Input signal should be in either of the following shapes.\n
             1. ``(len_audio)``\n
             2. ``(num_audio, len_audio)``\n
-            3. ``(num_audio, 1, len_audio)``      
+            3. ``(num_audio, 1, len_audio)``
             It will be automatically broadcast to the right shape
-        """           
-        
+        """
+
         x = self.melspec_layer(x)
         x = self._power_to_db(x)
         x = self._dct(x, norm='ortho')[:,:self.m_mfcc,:]
@@ -647,8 +662,8 @@ class MFCC(torch.nn.Module):
 
     def extra_repr(self) -> str:
         return 'n_mfcc = {}'.format(
-            (self.n_mfcc)        
-        )     
+            (self.n_mfcc)
+        )
 
 
 
@@ -658,8 +673,8 @@ class CQT1992(torch.nn.Module):
     This alogrithm uses the method proposed in [1]. Please refer to :func:`~nnAudio.Spectrogram.CQT1992v2` for a more
     computational and memory efficient version.
     [1] Brown, Judith C.C. and Miller Puckette. “An efficient algorithm for the calculation of a
-    constant Q transform.” (1992).    
-    
+    constant Q transform.” (1992).
+
     This function is to calculate the CQT of the input signal.
     Input signal should be in either of the following shapes.\n
     1. ``(len_audio)``\n
@@ -695,14 +710,14 @@ class CQT1992(torch.nn.Module):
 
     bins_per_octave : int
         Number of bins per octave. Default is 12.
-        
+
     trainable_STFT : bool
         Determine if the time to frequency domain transformation kernel for the input audio is trainable or not.
         Default is ``False``
-        
+
     trainable_CQT : bool
         Determine if the frequency domain CQT kernel is trainable or not.
-        Default is ``False``        
+        Default is ``False``
 
     norm : int
         Normalization for the CQT kernels. ``1`` means L1 normalization, and ``2`` means L2 normalization.
@@ -747,7 +762,7 @@ class CQT1992(torch.nn.Module):
     >>> spec_layer = Spectrogram.CQT1992v2()
     >>> specs = spec_layer(x)
     """
-    
+
     def __init__(self, sr=22050, hop_length=512, fmin=220, fmax=None, n_bins=84,
                  trainable_STFT=False, trainable_CQT=False, bins_per_octave=12,
                  output_format='Complex', norm=1, window='hann', center=True, pad_mode='reflect'):
@@ -774,7 +789,7 @@ class CQT1992(torch.nn.Module):
                                                                 norm,
                                                                 window,
                                                                 fmax)
-        
+
         self.register_buffer('lenghts', lenghts)
         cqt_kernels = fft(cqt_kernels)[:,:self.kernel_width//2+1]
         print("CQT kernels created, time used = {:.4f} seconds".format(time()-start))
@@ -791,20 +806,20 @@ class CQT1992(torch.nn.Module):
 
         # Converting kernels from numpy arrays to torch tensors
         wsin = torch.tensor(kernel_sin * window)
-        wcos = torch.tensor(kernel_cos * window) 
-        
+        wcos = torch.tensor(kernel_cos * window)
+
         cqt_kernels_real = torch.tensor(cqt_kernels.real.astype(np.float32))
         cqt_kernels_imag = torch.tensor(cqt_kernels.imag.astype(np.float32))
-        
+
         if trainable_STFT:
             wsin = torch.nn.Parameter(wsin, requires_grad=trainable_kernels)
             wcos = torch.nn.Parameter(wcos, requires_grad=trainable_kernels)
             self.register_parameter('wsin', wsin)
-            self.register_parameter('wcos', wcos)                   
+            self.register_parameter('wcos', wcos)
         else:
             self.register_buffer('wsin', wsin)
             self.register_buffer('wcos', wcos)
-            
+
         if trainable_CQT:
             cqt_kernels_real = torch.nn.Parameter(cqt_kernels_real, requires_grad=trainable_kernels)
             cqt_kernels_imag = torch.nn.Parameter(cqt_kernels_imag, requires_grad=trainable_kernels)
@@ -812,14 +827,14 @@ class CQT1992(torch.nn.Module):
             self.register_parameter('cqt_kernels_imag', cqt_kernels_imag)
         else:
             self.register_buffer('cqt_kernels_real', cqt_kernels_real)
-            self.register_buffer('cqt_kernels_imag', cqt_kernels_imag)                  
+            self.register_buffer('cqt_kernels_imag', cqt_kernels_imag)
 
         print("STFT kernels created, time used = {:.4f} seconds".format(time()-start))
 
     def forward(self, x, output_format=None):
         """
         Convert a batch of waveforms to CQT spectrograms.
-        
+
         Parameters
         ----------
         x : torch tensor
@@ -828,9 +843,9 @@ class CQT1992(torch.nn.Module):
             2. ``(num_audio, len_audio)``\n
             3. ``(num_audio, 1, len_audio)``
             It will be automatically broadcast to the right shape
-        """         
+        """
         output_format = output_format or self.output_format
-        
+
         x = broadcast_dim(x)
         if self.center:
             if self.pad_mode == 'constant':
@@ -838,7 +853,7 @@ class CQT1992(torch.nn.Module):
             elif self.pad_mode == 'reflect':
                 padding = nn.ReflectionPad1d(self.kernel_width//2)
 
-            x = padding(x)           
+            x = padding(x)
 
         # STFT
         fourier_real = conv1d(x, self.wcos, stride=self.hop_length)
@@ -847,9 +862,9 @@ class CQT1992(torch.nn.Module):
         # CQT
         CQT_real, CQT_imag = complex_mul((self.cqt_kernels_real, self.cqt_kernels_imag),
                                          (fourier_real, fourier_imag))
-        
+
         CQT = torch.stack((CQT_real,-CQT_imag),-1)
-        
+
         if self.norm:
             CQT = CQT/self.kernel_width*torch.sqrt(self.lenghts.view(-1,1,1))
         else:
@@ -861,16 +876,16 @@ class CQT1992(torch.nn.Module):
 
         elif output_format=='Complex':
             return CQT
-        
+
         elif output_format=='Phase':
             phase_real = torch.cos(torch.atan2(CQT_imag,CQT_real))
             phase_imag = torch.sin(torch.atan2(CQT_imag,CQT_real))
-            return torch.stack((phase_real,phase_imag), -1)     
-        
+            return torch.stack((phase_real,phase_imag), -1)
+
     def extra_repr(self) -> str:
         return 'STFT kernel size = {}, CQT kernel size = {}'.format(
-            (*self.wcos.shape,), (*self.cqt_kernels_real.shape,)        
-        )             
+            (*self.wcos.shape,), (*self.cqt_kernels_real.shape,)
+        )
 
 
 class CQT2010(torch.nn.Module):
@@ -962,7 +977,7 @@ class CQT2010(torch.nn.Module):
                                                                         Q,
                                                                         self.n_octaves,
                                                                         verbose)
-            
+
             self.register_buffer('early_downsample_filter', early_downsample_filter)
             if verbose==True:
                 print("Early downsampling filter created, \
@@ -1012,10 +1027,10 @@ class CQT2010(torch.nn.Module):
         kernel_sin, kernel_cos, self.bins2freq, _, window = create_fourier_kernels(self.n_fft, window='ones', freq_scale='no')
         wsin = kernel_sin * window
         wcos = kernel_cos * window
-        
+
         wsin = torch.tensor(wsin)
         wcos = torch.tensor(wcos)
-        
+
         if verbose==True:
             print("STFT kernels created, time used = {:.4f} seconds".format(time()-start))
 
@@ -1023,11 +1038,11 @@ class CQT2010(torch.nn.Module):
             wsin = torch.nn.Parameter(wsin, requires_grad=trainable_kernels)
             wcos = torch.nn.Parameter(wcos, requires_grad=trainable_kernels)
             self.register_parameter('wsin', wsin)
-            self.register_parameter('wcos', wcos)                   
+            self.register_parameter('wcos', wcos)
         else:
             self.register_buffer('wsin', wsin)
             self.register_buffer('wcos', wcos)
-            
+
         if trainable_CQT:
             cqt_kernels_real = torch.nn.Parameter(cqt_kernels_real, requires_grad=trainable_kernels)
             cqt_kernels_imag = torch.nn.Parameter(cqt_kernels_imag, requires_grad=trainable_kernels)
@@ -1035,8 +1050,8 @@ class CQT2010(torch.nn.Module):
             self.register_parameter('cqt_kernels_imag', cqt_kernels_imag)
         else:
             self.register_buffer('cqt_kernels_real', cqt_kernels_real)
-            self.register_buffer('cqt_kernels_imag', cqt_kernels_imag)  
-            
+            self.register_buffer('cqt_kernels_imag', cqt_kernels_imag)
+
         # If center==True, the STFT window will be put in the middle, and paddings at the beginning
         # and ending are required.
         if self.pad_mode == 'constant':
@@ -1048,7 +1063,7 @@ class CQT2010(torch.nn.Module):
     def forward(self,x, output_format=None):
         """
         Convert a batch of waveforms to CQT spectrograms.
-        
+
         Parameters
         ----------
         x : torch tensor
@@ -1057,9 +1072,9 @@ class CQT2010(torch.nn.Module):
             2. ``(num_audio, len_audio)``\n
             3. ``(num_audio, 1, len_audio)``
             It will be automatically broadcast to the right shape
-        """              
+        """
         output_format = output_format or self.output_format
-        
+
         x = broadcast_dim(x)
         if self.earlydownsample==True:
             x = downsampling_by_n(x, self.early_downsample_filter, self.downsample_factor)
@@ -1072,36 +1087,36 @@ class CQT2010(torch.nn.Module):
             x_down = downsampling_by_2(x_down, self.lowpass_filter)
             CQT1 = get_cqt_complex(x_down, self.wcos, self.wsin,  hop, self.padding)
             CQT = torch.cat((CQT1, CQT),1)
-            
+
         CQT = CQT[:,-self.n_bins:,:]  # Removing unwanted top bins
-        
+
         if self.norm:
             CQT = CQT/self.n_fft*torch.sqrt(self.lenghts.view(-1,1,1))
         else:
-            CQT = CQT*torch.sqrt(self.lenghts.view(-1,1,1))     
-            
+            CQT = CQT*torch.sqrt(self.lenghts.view(-1,1,1))
+
 
         # Normalizing the output with the downsampling factor, 2**(self.n_octaves-1)
         # is make it same mag as 1992
         CQT = CQT*self.downsample_factor
-        
+
         if output_format=='Magnitude':
             # Getting CQT Amplitude
             return torch.sqrt(CQT.pow(2).sum(-1))
-            
+
         elif output_format=='Complex':
             return CQT
-        
+
         elif output_format=='Phase':
             phase_real = torch.cos(torch.atan2(CQT[:,:,:,1],CQT[:,:,:,0]))
             phase_imag = torch.sin(torch.atan2(CQT[:,:,:,1],CQT[:,:,:,0]))
-            return torch.stack((phase_real,phase_imag), -1)             
+            return torch.stack((phase_real,phase_imag), -1)
 
     def extra_repr(self) -> str:
         return 'STFT kernel size = {}, CQT kernel size = {}'.format(
-            (*self.wcos.shape,), (*self.cqt_kernels_real.shape,)        
-        )          
-        
+            (*self.wcos.shape,), (*self.cqt_kernels_real.shape,)
+        )
+
 
 class CQT1992v2(torch.nn.Module):
     """This function is to calculate the CQT of the input signal.
@@ -1216,8 +1231,8 @@ class CQT1992v2(torch.nn.Module):
                                                                      window,
                                                                      fmax)
         self.register_buffer('lenghts', lenghts)
-        
-        
+
+
         cqt_kernels_real = torch.tensor(cqt_kernels.real).unsqueeze(1)
         cqt_kernels_imag = torch.tensor(cqt_kernels.imag).unsqueeze(1)
 
@@ -1237,7 +1252,7 @@ class CQT1992v2(torch.nn.Module):
     def forward(self,x, output_format=None):
         """
         Convert a batch of waveforms to CQT spectrograms.
-        
+
         Parameters
         ----------
         x : torch tensor
@@ -1248,7 +1263,7 @@ class CQT1992v2(torch.nn.Module):
             It will be automatically broadcast to the right shape
         """
         output_format = output_format or self.output_format
-        
+
         x = broadcast_dim(x)
         if self.center:
             if self.pad_mode == 'constant':
@@ -1284,7 +1299,7 @@ class CQT1992v2(torch.nn.Module):
         """
         Method for debugging
         """
-        
+
         x = broadcast_dim(x)
         if self.center:
             if self.pad_mode == 'constant':
@@ -1399,10 +1414,10 @@ class CQT2010v2(torch.nn.Module):
     >>> specs = spec_layer(x)
     """
 
-    
+
 # To DO:
 # need to deal with the filter and other tensors
-    
+
     def __init__(self, sr=22050, hop_length=512, fmin=32.70, fmax=None, n_bins=84,
                 bins_per_octave=12, norm=True, basis_norm=1, window='hann', pad_mode='reflect',
                 earlydownsample=True, trainable=False, output_format='Magnitude', verbose=True):
@@ -1477,7 +1492,7 @@ class CQT2010v2(torch.nn.Module):
                                                                         self.n_octaves,
                                                                         verbose)
             self.register_buffer('early_downsample_filter', early_downsample_filter)
-            
+
             if verbose==True:
                 print("Early downsampling filter created, \
                         time used = {:.4f} seconds".format(time()-start))
@@ -1506,7 +1521,7 @@ class CQT2010v2(torch.nn.Module):
         # These cqt_kernel is already in the frequency domain
         cqt_kernels_real = torch.tensor(basis.real.astype(np.float32)).unsqueeze(1)
         cqt_kernels_imag = torch.tensor(basis.imag.astype(np.float32)).unsqueeze(1)
-        
+
         if trainable:
             cqt_kernels_real = torch.nn.Parameter(cqt_kernels_real, requires_grad=trainable_kernels)
             cqt_kernels_imag = torch.nn.Parameter(cqt_kernels_imag, requires_grad=trainable_kernels)
@@ -1514,7 +1529,7 @@ class CQT2010v2(torch.nn.Module):
             self.register_parameter('cqt_kernels_imag', cqt_kernels_imag)
         else:
             self.register_buffer('cqt_kernels_real', cqt_kernels_real)
-            self.register_buffer('cqt_kernels_imag', cqt_kernels_imag)         
+            self.register_buffer('cqt_kernels_imag', cqt_kernels_imag)
 
 
         if verbose==True:
@@ -1527,12 +1542,12 @@ class CQT2010v2(torch.nn.Module):
             self.padding = nn.ConstantPad1d(self.n_fft//2, 0)
         elif self.pad_mode == 'reflect':
             self.padding = nn.ReflectionPad1d(self.n_fft//2)
-            
+
 
     def forward(self,x,output_format=None):
         """
         Convert a batch of waveforms to CQT spectrograms.
-        
+
         Parameters
         ----------
         x : torch tensor
@@ -1541,9 +1556,9 @@ class CQT2010v2(torch.nn.Module):
             2. ``(num_audio, len_audio)``\n
             3. ``(num_audio, 1, len_audio)``
             It will be automatically broadcast to the right shape
-        """              
+        """
         output_format = output_format or self.output_format
-        
+
         x = broadcast_dim(x)
         if self.earlydownsample==True:
             x = downsampling_by_n(x, self.early_downsample_filter, self.downsample_factor)
@@ -1597,7 +1612,7 @@ class CQT(CQT1992v2):
 
 class DFT(torch.nn.Module):
     """
-    Experimental feature before `torch.fft` was made avaliable. 
+    Experimental feature before `torch.fft` was made avaliable.
     The inverse function only works for 1 single frame. i.e. input shape = (batch, n_fft, 1)
     """
     def __init__(self, n_fft=2048, freq_bins=None, hop_length=512,
@@ -1625,7 +1640,7 @@ class DFT(torch.nn.Module):
     def forward(self,x):
         """
         Convert a batch of waveforms to spectrums.
-        
+
         Parameters
         ----------
         x : torch tensor
@@ -1634,7 +1649,7 @@ class DFT(torch.nn.Module):
             2. ``(num_audio, len_audio)``\n
             3. ``(num_audio, 1, len_audio)``
             It will be automatically broadcast to the right shape
-        """              
+        """
         x = broadcast_dim(x)
         if self.center:
             if self.pad_mode == 'constant':
@@ -1651,14 +1666,14 @@ class DFT(torch.nn.Module):
     def inverse(self,x_real,x_imag):
         """
         Convert a batch of waveforms to CQT spectrograms.
-        
+
         Parameters
         ----------
         x_real : torch tensor
             Real part of the signal.
         x_imag : torch tensor
             Imaginary part of the signal.
-        """              
+        """
         x_real = broadcast_dim(x_real)
         x_imag = broadcast_dim(x_imag)
 
@@ -1693,14 +1708,14 @@ class DFT(torch.nn.Module):
 
 
 
-    
+
 class iSTFT(torch.nn.Module):
     """This class is to convert spectrograms back to waveforms. It only works for the complex value spectrograms.
-    If you have the magnitude spectrograms, please use :func:`~nnAudio.Spectrogram.Griffin_Lim`. 
+    If you have the magnitude spectrograms, please use :func:`~nnAudio.Spectrogram.Griffin_Lim`.
     The parameters (e.g. n_fft, window) need to be the same as the STFT in order to obtain the correct inverse.
-    If trainability is not required, it is recommended to use the ``inverse`` method under the ``STFT`` class 
+    If trainability is not required, it is recommended to use the ``inverse`` method under the ``STFT`` class
     to save GPU/RAM memory.
-    
+
     When ``trainable=True`` and ``freq_scale!='no'``, there is no guarantee that the inverse is perfect, please
     use with extra care.
 
@@ -1731,7 +1746,7 @@ class iSTFT(torch.nn.Module):
     center : bool
         Putting the iSTFT keneral at the center of the time-step or not. If ``False``, the time
         index is the beginning of the iSTFT kernel, if ``True``, the time index is the center of
-        the iSTFT kernel. Default value if ``True``. 
+        the iSTFT kernel. Default value if ``True``.
         Please make sure the value is the same as the forward STFT.
 
     fmin : int
@@ -1750,7 +1765,7 @@ class iSTFT(torch.nn.Module):
         Determine if the STFT kenrels are trainable or not. If ``True``, the gradients for STFT
         kernels will also be caluclated and the STFT kernels will be updated during model training.
         Default value is ``False``.
-        
+
     trainable_window : bool
         Determine if the window function is trainable or not.
         Default value is ``False``.
@@ -1782,14 +1797,14 @@ class iSTFT(torch.nn.Module):
         if win_length==None: win_length = n_fft
         if hop_length==None: hop_length = int(win_length // 4)
 
-        self.n_fft = n_fft    
+        self.n_fft = n_fft
         self.win_length = win_length
         self.stride = hop_length
         self.center = center
-        
+
         self.pad_amount = self.n_fft // 2
-        self.refresh_win = refresh_win 
-        
+        self.refresh_win = refresh_win
+
         start = time()
 
         # Create the window function and prepare the shape for batch-wise-time-wise multiplication
@@ -1805,14 +1820,14 @@ class iSTFT(torch.nn.Module):
                                                           sr=sr,
                                                           verbose=False)
         window_mask = get_window(window,int(win_length), fftbins=True)
-        
+
         # For inverse, the Fourier kernels do not need to be windowed
         window_mask = torch.tensor(window_mask).unsqueeze(0).unsqueeze(-1)
-        
+
         # kernel_sin and kernel_cos have the shape (freq_bins, 1, n_fft, 1) to support 2D Conv
         kernel_sin = torch.tensor(kernel_sin, dtype=torch.float).unsqueeze(-1)
-        kernel_cos = torch.tensor(kernel_cos, dtype=torch.float).unsqueeze(-1)        
-        
+        kernel_cos = torch.tensor(kernel_cos, dtype=torch.float).unsqueeze(-1)
+
         # Decide if the Fourier kernels are trainable
         if trainable_kernels:
             # Making all these variables trainable
@@ -1824,14 +1839,14 @@ class iSTFT(torch.nn.Module):
         else:
             self.register_buffer('kernel_sin', kernel_sin)
             self.register_buffer('kernel_cos', kernel_cos)
-            
+
         # Decide if the window function is trainable
         if trainable_window:
             window_mask = torch.nn.Parameter(window_mask, requires_grad=trainable_window)
             self.register_parameter('window_mask', window_mask)
         else:
             self.register_buffer('window_mask', window_mask)
-        
+
 
         if verbose==True:
             print("iSTFT kernels created, time used = {:.4f} seconds".format(time()-start))
@@ -1851,25 +1866,25 @@ class iSTFT(torch.nn.Module):
         """
         if refresh_win==None:
             refresh_win=self.refresh_win
-                
+
         assert X.dim()==4 , "Inverse iSTFT only works for complex number," \
-                            "make sure our tensor is in the shape of (batch, freq_bins, timesteps, 2)" 
-        
+                            "make sure our tensor is in the shape of (batch, freq_bins, timesteps, 2)"
+
         # If the input spectrogram contains only half of the n_fft
         # Use extend_fbins function to get back another half
         if onesided:
             X = extend_fbins(X) # extend freq
 
-    
+
         X_real, X_imag = X[:, :, :, 0], X[:, :, :, 1]
 
         # broadcast dimensions to support 2D convolution
         X_real_bc = X_real.unsqueeze(1)
         X_imag_bc = X_imag.unsqueeze(1)
-        
+
         a1 = conv2d(X_real_bc, self.kernel_cos, stride=(1,1))
         b2 = conv2d(X_imag_bc, self.kernel_sin, stride=(1,1))
-       
+
         # compute real and imag part. signal lies in the real part
         real = a1 - b2
         real = real.squeeze(-2)*self.window_mask
@@ -1879,38 +1894,38 @@ class iSTFT(torch.nn.Module):
 
         # Overlap and Add algorithm to connect all the frames
         real = overlap_add(real, self.stride)
-    
+
         # Prepare the window sumsqure for division
         # Only need to create this window once to save time
         # Unless the input spectrograms have different time steps
         if hasattr(self, 'w_sum')==False or refresh_win==True:
             self.w_sum = torch_window_sumsquare(self.window_mask.flatten(), X.shape[2], self.stride, self.n_fft).flatten()
-            self.nonzero_indices = (self.w_sum>1e-10)    
+            self.nonzero_indices = (self.w_sum>1e-10)
         else:
             pass
         real[:, self.nonzero_indices] = real[:,self.nonzero_indices].div(self.w_sum[self.nonzero_indices])
         # Remove padding
-        if length is None:       
+        if length is None:
             if self.center:
                 real = real[:, self.pad_amount:-self.pad_amount]
 
         else:
             if self.center:
-                real = real[:, self.pad_amount:self.pad_amount + length]    
+                real = real[:, self.pad_amount:self.pad_amount + length]
             else:
-                real = real[:, :length] 
-            
+                real = real[:, :length]
+
         return real
-    
-    
+
+
 class Griffin_Lim(torch.nn.Module):
     """
     Converting Magnitude spectrograms back to waveforms based on the "fast Griffin-Lim"[1].
     This Griffin Lim is a direct clone from librosa.griffinlim.
-    
+
     [1] Perraudin, N., Balazs, P., & Søndergaard, P. L. “A fast Griffin-Lim algorithm,”
     IEEE Workshop on Applications of Signal Processing to Audio and Acoustics (pp. 1-4), Oct. 2013.
-    
+
     Parameters
     ----------
     n_fft : int
@@ -1931,7 +1946,7 @@ class Griffin_Lim(torch.nn.Module):
     center : bool
         Putting the iSTFT keneral at the center of the time-step or not. If ``False``, the time
         index is the beginning of the iSTFT kernel, if ``True``, the time index is the center of
-        the iSTFT kernel. Default value if ``True``. 
+        the iSTFT kernel. Default value if ``True``.
         Please make sure the value is the same as the forward STFT.
 
     momentum : float
@@ -1940,9 +1955,9 @@ class Griffin_Lim(torch.nn.Module):
     device : str
         Choose which device to initialize this layer. Default value is 'cpu'
 
-    
+
     """
-    
+
     def __init__(self,
                  n_fft,
                  n_iter=32,
@@ -1980,13 +1995,13 @@ class Griffin_Lim(torch.nn.Module):
     def forward(self, S):
         """
         Convert a batch of magnitude spectrograms to waveforms.
-        
+
         Parameters
         ----------
         S : torch tensor
-            Spectrogram of the shape ``(batch, n_fft//2+1, timesteps)``    
+            Spectrogram of the shape ``(batch, n_fft//2+1, timesteps)``
         """
-        
+
         assert S.dim()==3 , "Please make sure your input is in the shape of (batch, freq_bins, timesteps)"
 
         # Initializing Random Phase
